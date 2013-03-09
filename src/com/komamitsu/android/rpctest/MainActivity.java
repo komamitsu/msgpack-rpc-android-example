@@ -1,20 +1,24 @@
 package com.komamitsu.android.rpctest;
 
 import java.net.UnknownHostException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.msgpack.rpc.Client;
 import org.msgpack.rpc.loop.EventLoop;
 
 import android.app.Activity;
-import android.os.AsyncTask;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Menu;
-import android.widget.Toast;
 
 public class MainActivity extends Activity {
   public static interface RPCInterface {
     int add(int a, int b);
   }
+
+  protected static final String TAG = MainActivity.class.getSimpleName();
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -29,33 +33,39 @@ public class MainActivity extends Activity {
   protected void onResume() {
     super.onResume();
 
-    /*
-    Logger logger = LoggerFactory.getLogger(this.getClass());
-    logger.info("hogehoge");
-    */
-    new AsyncTask<Void, Void, Integer>() {
-      Exception e;
+    EventLoop loop = EventLoop.defaultEventLoop();
+    Client client;
+    try {
+      client = new Client("192.168.0.6", 9090, loop);
+    } catch (UnknownHostException e) {
+      e.printStackTrace();
+      return;
+    }
 
-      @Override
-      protected Integer doInBackground(Void... params) {
-        EventLoop loop = EventLoop.defaultEventLoop();
-        try {
-          Client client = new Client("192.168.0.6", 9090, loop);
-          RPCInterface rpcInterface = client.proxy(RPCInterface.class);
-          return rpcInterface.add(123, 456);
-        } catch (UnknownHostException e) {
-          this.e = e;
-          return null;
+    final RPCInterface rpcInterface = client.proxy(RPCInterface.class);
+
+    ExecutorService executorService = Executors.newFixedThreadPool(30);
+    final AtomicInteger count = new AtomicInteger();
+    final int max = 10000;
+    for (int i = 0; i < max; i++) {
+      final int a = i;
+
+      executorService.execute(new Runnable() {
+
+        @Override
+        public void run() {
+          int b = (max - a) * 7;
+          int expectedSum = a + b;
+          int sum = rpcInterface.add(a, b);
+          if (expectedSum != sum) {
+            Log.w(TAG, "wrong result: a=" + a + ", b=" + b + ", result=" + sum);
+          }
+          int incrementedCount = count.incrementAndGet();
+          if (incrementedCount % 500 == 0)
+            Log.i(TAG, "count: " + incrementedCount);
         }
-      }
-
-      @Override
-      protected void onPostExecute(Integer result) {
-        String msg = (e == null) ?
-            ("result => " + result) : ("error => " + e.getMessage());
-        Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
-      }
-    }.execute();
+      });
+    }
   }
 
   @Override
