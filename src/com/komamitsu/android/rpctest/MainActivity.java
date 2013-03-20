@@ -1,11 +1,13 @@
 package com.komamitsu.android.rpctest;
 
+import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.msgpack.rpc.Client;
+import org.msgpack.rpc.Server;
 import org.msgpack.rpc.loop.EventLoop;
 
 import android.app.Activity;
@@ -20,6 +22,88 @@ public class MainActivity extends Activity {
 
   protected static final String TAG = MainActivity.class.getSimpleName();
 
+  private static final int PORT = 9090;
+  private static final String HOST = "127.0.0.1";
+  private RpcServerRunner serverRunner;
+  private RpcClientRunner clientRunner;
+
+  private static class RpcClientRunner {
+    protected ExecutorService executor;
+
+    public void start() throws UnknownHostException {
+      EventLoop loop = EventLoop.defaultEventLoop();
+
+      Client client;
+      client = new Client(HOST, PORT, loop);
+
+      final RPCInterface rpcInterface = client.proxy(RPCInterface.class);
+
+      executor = Executors.newFixedThreadPool(5);
+      final AtomicInteger count = new AtomicInteger();
+
+      final int max = 50000;
+      for (int i = 0; i < max; i++) {
+        final int a = i;
+
+        executor.execute(new Runnable() {
+
+          @Override
+          public void run() {
+            int b = (max - a) * 7;
+            int expectedSum = a + b;
+            int sum = rpcInterface.add(a, b);
+            if (expectedSum != sum) {
+              Log.w(TAG, "wrong result: a=" + a + ", b=" + b + ", result=" + sum);
+            }
+            int incrementedCount = count.incrementAndGet();
+            if (incrementedCount % 500 == 0) {
+              Log.i(TAG, "count: " + incrementedCount);
+            }
+          }
+        });
+      }
+    }
+
+    public void stop() {
+      if (executor != null)
+        executor.shutdownNow();
+    }
+  }
+
+  private static class RpcServer {
+    @SuppressWarnings("unused")
+    public int add(int a, int b) {
+      // Log.d(TAG, String.format("add: a=%d, b=%d", a, b));
+      return a + b;
+    }
+  }
+
+  private static class RpcServerRunner {
+    private final Server server = new Server();
+
+    public void start() throws UnknownHostException, IOException {
+      final EventLoop eventLoop = EventLoop.defaultEventLoop();
+      server.serve(new RpcServer());
+      server.listen(HOST, PORT);
+      Executors.newSingleThreadExecutor().execute(new Runnable() {
+
+        @Override
+        public void run() {
+          try {
+            eventLoop.join();
+          } catch (InterruptedException e) {
+            e.printStackTrace();
+          }
+        }
+      });
+    }
+
+    public void stop() {
+      if (server != null)
+        server.close();
+    }
+  }
+
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
@@ -32,40 +116,28 @@ public class MainActivity extends Activity {
   @Override
   protected void onResume() {
     super.onResume();
-
-    EventLoop loop = EventLoop.defaultEventLoop();
-    Client client;
     try {
-      client = new Client("192.168.0.6", 9090, loop);
+      serverRunner = new RpcServerRunner();
+      serverRunner.start();
+
+      clientRunner = new RpcClientRunner();
+      clientRunner.start();
     } catch (UnknownHostException e) {
       e.printStackTrace();
-      return;
+    } catch (IOException e) {
+      e.printStackTrace();
     }
+  }
 
-    final RPCInterface rpcInterface = client.proxy(RPCInterface.class);
+  @Override
+  protected void onPause() {
+    super.onPause();
 
-    ExecutorService executorService = Executors.newFixedThreadPool(30);
-    final AtomicInteger count = new AtomicInteger();
-    final int max = 10000;
-    for (int i = 0; i < max; i++) {
-      final int a = i;
+    if (serverRunner != null)
+      serverRunner.stop();
 
-      executorService.execute(new Runnable() {
-
-        @Override
-        public void run() {
-          int b = (max - a) * 7;
-          int expectedSum = a + b;
-          int sum = rpcInterface.add(a, b);
-          if (expectedSum != sum) {
-            Log.w(TAG, "wrong result: a=" + a + ", b=" + b + ", result=" + sum);
-          }
-          int incrementedCount = count.incrementAndGet();
-          if (incrementedCount % 500 == 0)
-            Log.i(TAG, "count: " + incrementedCount);
-        }
-      });
-    }
+    if (clientRunner != null)
+      clientRunner.stop();
   }
 
   @Override
