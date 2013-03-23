@@ -47,7 +47,6 @@ public class MainActivity extends Activity {
 
         executor.execute(new Runnable() {
 
-          @Override
           public void run() {
             int b = (max - a) * 7;
             int expectedSum = a + b;
@@ -87,7 +86,6 @@ public class MainActivity extends Activity {
       server.listen(HOST, PORT);
       Executors.newSingleThreadExecutor().execute(new Runnable() {
 
-        @Override
         public void run() {
           try {
             eventLoop.join();
